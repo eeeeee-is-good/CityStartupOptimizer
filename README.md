@@ -31,8 +31,8 @@ For Pittman Center, the timeline entry `ExtraAssetsImporter finished` marks when
 `Verify.ps1` is the end-to-end check used while developing the optimizer, and it only runs on the author's machine. It launches the game through the CS2 Test Harness, opens one particular save, pauses, and quits. It then confirms that the optimizer's session log recorded the playset, dependency-resolution and prefab steps, and that the save, active playset and settings files are unchanged. It depends on files outside this repository:
 
 - `..\settings-load-test\snapshots.ps1`, which backs up and restores the game's settings files.
-- The harness runner `cs2-test.ps1` at a fixed local path, and one specific CS2TestHarness build, checked by hash.
-- One specific save file in the author's Saves folder.
+- The harness runner `cs2-test.ps1`, given by `-Runner` (the default is the author's local copy), and one specific CS2TestHarness build, checked by hash.
+- A save named by `-SaveName`, found under the game's Saves folder; the default is the author's Pittman Center test save.
 - With `-WaitForImporter`, a staged harness from `..\pittman-loading` that waits for ExtraAssetsImporter before opening the save.
 
 `-CompareContents` turns on the content audit, which adds a SHA-256 digest of each pack's asset IDs to `packs.tsv`. To check your own installation, run `TestFallback.ps1` and read the session logs described in "Reading a launch". `TestFallback.ps1` runs without starting the game. Run it with PowerShell 7 after `Build.ps1`. It reads the game folder from the modding toolchain's `CSII_MANAGEDPATH` variable.
