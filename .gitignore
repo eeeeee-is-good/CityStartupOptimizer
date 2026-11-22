@@ -1,0 +1,7 @@
+# Build output: contains patched copies of the game's own DLLs; rebuild with Build.ps1 (PowerShell 7)
+build/
+# Test and validation run folders created by TestFallback.ps1 and Verify.ps1
+guard-test-*/
+validation-*/
+__pycache__/
+*.tmp
