@@ -193,6 +193,26 @@ namespace CityStartupOptimizer
             Interlocked.Increment(ref archives);
         }
 
+        // The patched Game.dll and Colossal.IO.AssetDatabase.dll load from Cities2_Data\Managed\CityStartupOptimizer\, so
+        // their Assembly.Location stays inside the game's Managed folder (Write Everywhere, for one, classifies game types
+        // by that path). ExecutableAsset.GetModAssets matches a loaded assembly to the resolver's Managed\<name>.dll by exact
+        // location; this also accepts the relocated copy, which keeps the game's "in-game assembly shipped with a mod" skip.
+        public const string RelocatedFolder = "CityStartupOptimizer";
+
+        public static bool SameAssemblyFile(string loadedLocation, string resolvedFile)
+        {
+            if (string.Equals(loadedLocation, resolvedFile)) return true; // the game's own comparison
+            if (string.IsNullOrEmpty(loadedLocation) || string.IsNullOrEmpty(resolvedFile)) return false;
+            try
+            {
+                string folder = Path.GetDirectoryName(Path.GetFullPath(loadedLocation));
+                return string.Equals(Path.GetFileName(folder), RelocatedFolder, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(Path.GetFileName(loadedLocation), Path.GetFileName(resolvedFile), StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(Path.GetDirectoryName(folder), Path.GetDirectoryName(Path.GetFullPath(resolvedFile)), StringComparison.OrdinalIgnoreCase);
+            }
+            catch (Exception) { return false; }
+        }
+
         public static Task JoinStartupScreens(Task loading, Task splash)
         {
             Session.Event("Startup loading continues alongside the native studio sequence.");

@@ -28,6 +28,16 @@ if ([CityStartupOptimizer.Loading]::Absent($entries, 'c.cok', 'C.DLL')) { throw 
 if ([CityStartupOptimizer.Loading]::RegisteringDependency()) { throw 'Fast path still active outside registration' }
 Write-Host 'Verified unknown-build fallback and registration path invalidation in an isolated directory.'
 
+$m = 'C:\Game\Cities2_Data\Managed'
+if (![CityStartupOptimizer.Loading]::SameAssemblyFile("$m\CityStartupOptimizer\Game.dll", "$m\Game.dll")) { throw 'Relocated Game.dll not paired with Managed\Game.dll' }
+if (![CityStartupOptimizer.Loading]::SameAssemblyFile("$m\CityStartupOptimizer\Colossal.IO.AssetDatabase.dll", "$m/colossal.io.assetdatabase.dll")) { throw 'Relocated database not paired (case or separator)' }
+if (![CityStartupOptimizer.Loading]::SameAssemblyFile("$m\Game.dll", "$m\Game.dll")) { throw 'Identical location not paired' }
+if ([CityStartupOptimizer.Loading]::SameAssemblyFile("$m\CityStartupOptimizer\Game.dll", "$m\Colossal.Core.dll")) { throw 'Different file paired' }
+if ([CityStartupOptimizer.Loading]::SameAssemblyFile('C:\Mods\X\CityStartupOptimizer\Game.dll', "$m\Game.dll")) { throw 'Copy outside Managed paired' }
+if ([CityStartupOptimizer.Loading]::SameAssemblyFile("$m\Other\Game.dll", "$m\Game.dll")) { throw 'Unrelated folder paired' }
+if ([CityStartupOptimizer.Loading]::SameAssemblyFile('', "$m\Game.dll")) { throw 'Empty location (dynamic assembly) paired' }
+Write-Host 'Verified that only the relocated copy of a Managed library is paired with it.'
+
 $path="$fake/sample.zip"
 $w=[IO.Compression.ZipFile]::Open($path,[IO.Compression.ZipArchiveMode]::Create)
 try {

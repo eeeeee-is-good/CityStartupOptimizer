@@ -177,6 +177,19 @@ foreach($method in @($fs.Methods)+@($entry.Methods)){
         if($observer){$il=$method.Body.GetILProcessor(); Before $method $site @($il.Create($op::Ldarg_0),$il.Create($op::Call,$observer))}
     }
 }
+# The patched libraries load from Managed\CityStartupOptimizer\. GetModAssets pairs a loaded assembly with the resolver's
+# Managed\<name>.dll by comparing Assembly.Location to that file name; Loading.SameAssemblyFile also accepts the relocated copy.
+$sites = @(foreach ($closure in @($exe.NestedTypes | Where-Object Name -like '<>c__DisplayClass*')) {
+    foreach ($method in @($closure.Methods | Where-Object { $_.Name -like '<GetModAssets>b__*' -and $_.HasBody })) {
+        $body = @($method.Body.Instructions)
+        foreach ($ins in $body) {
+            if ($ins.OpCode.Name -eq 'call' -and $ins.Operand.FullName -eq 'System.Boolean System.String::op_Equality(System.String,System.String)' -and
+                ($body | Where-Object { $_.Operand.Name -eq 'get_Location' }) -and ($body | Where-Object { $_.Operand.Name -eq 'get_FileName' })) { $ins }
+        }
+    }
+})
+if ($sites.Count -ne 1) { throw "Expected one GetModAssets location comparison, got $($sites.Count)" }
+$sites[0].Operand = $refs.SameAssemblyFile
 $db.Write("$stage/Colossal.IO.AssetDatabase.dll")
 
 $refs = Refs $game.MainModule

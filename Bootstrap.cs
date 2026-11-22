@@ -11,6 +11,7 @@ namespace CityStartupOptimizer
     {
         static bool Matches(string path, string expected)
         {
+            if (!File.Exists(path)) return false;
             using (var file = File.OpenRead(path))
             using (var hash = SHA256.Create())
                 return BitConverter.ToString(hash.ComputeHash(file)).Replace("-", "") == expected;
@@ -45,7 +46,10 @@ namespace CityStartupOptimizer
                     log("Stock loading selected. The installed game build differs from the tested build.");
                     return;
                 }
-                if (!Matches(Path.Combine(package, database), Build.Database) || !Matches(Path.Combine(package, gameDll), Build.Game))
+                // The patched libraries live in Managed\CityStartupOptimizer\ so that Assembly.Location stays inside the
+                // game's Managed folder, where mods and the game expect game assemblies (see Loading.SameAssemblyFile).
+                string relocated = Path.Combine(managed, "CityStartupOptimizer");
+                if (!Matches(Path.Combine(relocated, database), Build.Database) || !Matches(Path.Combine(relocated, gameDll), Build.Game))
                 {
                     log("Stock loading selected. The optimizer files failed verification.");
                     return;
@@ -60,7 +64,7 @@ namespace CityStartupOptimizer
                 }
                 foreach (var name in new[] { database, gameDll })
                 {
-                    var file = Path.Combine(package, name);
+                    var file = Path.Combine(relocated, name);
                     var loaded = Assembly.LoadFrom(file);
                     if (!String.Equals(Path.GetFullPath(loaded.Location), Path.GetFullPath(file), StringComparison.OrdinalIgnoreCase))
                         throw new InvalidOperationException(name + " was already bound to another location");
