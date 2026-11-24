@@ -5,3 +5,4 @@ guard-test-*/
 validation-*/
 __pycache__/
 *.tmp
+cache-test-*/

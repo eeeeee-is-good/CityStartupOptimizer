@@ -12,10 +12,10 @@ foreach ($name in $stock.Keys) {
 }
 $sdk = (dotnet --list-sdks | Select-Object -Last 1) -replace '^([^ ]+) \[(.+)\]$','$2\$1'
 function Compile($name, $sources) {
-    dotnet "$sdk/Roslyn/bincore/csc.dll" /nologo /nostdlib /optimize+ /deterministic+ /target:library "/out:$stage/$name.dll" "/reference:$managed/mscorlib.dll" "/reference:$managed/System.dll" "/reference:$managed/System.Core.dll" "/reference:$managed/Colossal.Core.dll" "/reference:$managed/Colossal.IO.AssetDatabase.dll" "/reference:$managed/UnityEngine.CoreModule.dll" @sources
+    dotnet "$sdk/Roslyn/bincore/csc.dll" /nologo /nostdlib /optimize+ /deterministic+ /target:library "/out:$stage/$name.dll" "/reference:$managed/mscorlib.dll" "/reference:$managed/System.dll" "/reference:$managed/System.Core.dll" "/reference:$managed/Colossal.Core.dll" "/reference:$managed/Colossal.IO.AssetDatabase.dll" "/reference:$managed/UnityEngine.CoreModule.dll" "/reference:$managed/ICSharpCode.SharpZipLib.dll" "/reference:$managed/Unity.Mathematics.dll" @sources
     if ($LASTEXITCODE) { throw "Compile failed for $name" }
 }
-Compile CityStartupRuntime @("$PSScriptRoot/Ownership.cs","$PSScriptRoot/Session.cs","$PSScriptRoot/Loading.cs","$PSScriptRoot/ArchiveDirectoryStream.cs")
+Compile CityStartupRuntime @("$PSScriptRoot/Ownership.cs","$PSScriptRoot/Session.cs","$PSScriptRoot/Loading.cs","$PSScriptRoot/ArchiveDirectoryStream.cs","$PSScriptRoot/PackageCache.cs","$PSScriptRoot/Prefetch.cs")
 $null = [Reflection.Assembly]::LoadFrom("$managed/Colossal.Mono.Cecil.dll")
 $resolver = [Colossal.Mono.Cecil.DefaultAssemblyResolver]::new()
 $resolver.AddSearchDirectory($managed)
@@ -61,7 +61,8 @@ function Need($ok, $what) {
     if (!$ok) { throw "Patch site not found or changed: $what. The game code no longer matches what this build expects." }
 }
 function One($what, $items) {
-    $items = @($items)
+    # A pipeline with no output arrives as $null, and @($null) has one element: count only real items.
+    $items = @(@($items) | Where-Object { $null -ne $_ })
     Need ($items.Count -eq 1) "$what (found $($items.Count) candidates)"
     $items[0]
 }
@@ -157,8 +158,42 @@ $zipStore = $zipCtor.Next
 $directoryDone = $zipStore.Next
 Need ($zipCtor.Previous.Operand.Name -eq 'GetReadStream' -and $zipStore.OpCode.Name -like 'stloc*' -and $directoryDone.OpCode.Name -like 'ldloc*' -and
     (LocalOf $package $directoryDone) -eq (LocalOf $package $zipStore) -and ($package.Body.ExceptionHandlers | Where-Object { $_.TryStart -eq $directoryDone })) 'archive directory site'
+# Package cache: the scan starts at "new ZipFile(GetReadStream(info))", the first instruction of the try that turns
+# ZipException into CorruptedCokException. Nothing branches there, so code inserted in front of it runs outside that try,
+# after the entry and file checks, and can return. The try's last instruction leaves for the method's only exit.
+$cache = @{}
+foreach ($method in $runtime.MainModule.GetType('CityStartupOptimizer.PackageCache').Methods) {
+    if ($method.IsPublic) { $cache[$method.Name] = $m.ImportReference($method) }
+}
+Need (($package.Parameters | ForEach-Object { $_.Name }) -join ',' -ceq 'warnCollision,priorityData,packageGuid,offset,newData,relativePathStartOverride') 'package scan parameters'
+$supportedRead = One 'package scan extension list' (Calls $package 'System.Collections.Generic.IReadOnlyCollection`1<System.String> Colossal.IO.AssetDatabase.IAssetFactory::GetSupportedExtensions()')
+$supported = LocalOf $package $supportedRead.Next
+$entryRead = One 'package entry lookup' (Calls $package 'System.Boolean Colossal.IO.AssetDatabase.FileSystemDataSource::TryGetEntry(Colossal.Hash128,Colossal.IO.AssetDatabase.FileSystemDataSource/EntryInfo&)')
+$info = LocalOf $package $entryRead.Previous
+$scanStart = Back $zipCtor 3
+$zipCatch = One 'package scan error handler' ($package.Body.ExceptionHandlers | Where-Object { $_.TryStart -eq $scanStart -and $_.HandlerType -eq 'Catch' -and $_.CatchType.FullName -eq 'ICSharpCode.SharpZipLib.Zip.ZipException' })
+$packageExit = OnlyExit $package
+$scanDone = $zipCatch.TryEnd.Previous
+$entryAdd = One 'package entry registration' (Find $package { $_.Operand -is [Colossal.Mono.Cecil.MethodReference] -and $_.Operand.Name -eq 'AddEntry' -and $_.Operand.Parameters.Count -eq 13 })
+$issues = @(Find $package { $_.OpCode.Name -eq 'ldsfld' -and $_.Operand.FullName -eq 'Colossal.Logging.ILog Colossal.IO.AssetDatabase.FileSystemDataSource::log' })
+Need ($supportedRead.Next.OpCode.Name -like 'stloc*' -and $supported.VariableType.FullName -eq 'System.Collections.Generic.IReadOnlyCollection`1<System.String>' -and
+    $entryRead.Previous.OpCode.Name -eq 'ldloca.s' -and $info.VariableType.FullName -eq 'Colossal.IO.AssetDatabase.FileSystemDataSource/EntryInfo' -and
+    $scanStart.OpCode.Name -eq 'ldarg.0' -and (LocalOf $package $scanStart.Next) -eq $info -and $scanStart.Next.Next.Operand.Name -eq 'GetReadStream' -and
+    !(Find $package { $_.Operand -eq $scanStart }) -and $scanDone.OpCode.Name -like 'leave*' -and $scanDone.Operand -eq $packageExit -and
+    $entryAdd.OpCode.Name -eq 'call' -and $entryAdd.Operand.FullName -eq 'Colossal.IO.AssetDatabase.Identifier Colossal.IO.AssetDatabase.FileSystemDataSource::AddEntry(Colossal.IO.AssetDatabase.DataSourceModification,System.Boolean,System.String,System.Type,System.Int64,System.Int64,System.Boolean,Colossal.Hash128,Colossal.Hash128,System.String,System.Boolean,System.Collections.Generic.List`1<System.ValueTuple`2<System.Type,Colossal.IO.AssetDatabase.Identifier>>,System.Int32)' -and
+    (($issues | ForEach-Object { (Span $_ $packageExit | Where-Object { $_.Operand -is [Colossal.Mono.Cecil.MethodReference] -and $_.Operand.DeclaringType.FullName -eq 'Colossal.Logging.ILog' } | Select-Object -First 1).Operand.Name }) -join ',') -ceq 'WarnFormat,WarnFormat,Error') 'package scan structure'
 Widen $package
 $il = $package.Body.GetILProcessor()
+$frameVar = [Colossal.Mono.Cecil.Cil.VariableDefinition]::new($m.TypeSystem.Object)
+$package.Body.Variables.Add($frameVar)
+foreach ($i in @($il.Create($op::Ldarg_0),(Load $il $info),$il.Create($op::Ldarg_3),$il.Create($op::Ldarg,$package.Parameters[3]),$il.Create($op::Ldarg_1),
+    $il.Create($op::Ldarg_2),$il.Create($op::Ldarg,$package.Parameters[4]),$il.Create($op::Ldarg,$package.Parameters[5]),(Load $il $supported),
+    $il.Create($op::Call,$cache.PackageBegin),$il.Create($op::Dup),$il.Create($op::Stloc,$frameVar),$il.Create($op::Call,$cache.Replayed),$il.Create($op::Brtrue,$packageExit))) {
+    $il.InsertBefore($scanStart, $i)
+}
+Before $package $scanDone @($il.Create($op::Ldloc,$frameVar),$il.Create($op::Call,$cache.PackageEnd))
+foreach ($site in $issues) { Before $package $site @($il.Create($op::Call,$cache.PackageIssue)) }
+$entryAdd.Operand = $cache.PackageEntry
 $streamVar = [Colossal.Mono.Cecil.Cil.VariableDefinition]::new($zipCtor.Operand.Parameters[0].ParameterType)
 $package.Body.Variables.Add($streamVar)
 Before $package $zipCtor @($il.Create($op::Ldarg_0),$il.Create($op::Isinst,$playsetType),$il.Create($op::Ldnull),$il.Create($op::Cgt_Un),$il.Create($op::Call,$refs.BeginArchiveDirectory),$il.Create($op::Dup),$il.Create($op::Stloc,$streamVar))

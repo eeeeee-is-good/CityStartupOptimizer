@@ -36,7 +36,7 @@ namespace CityStartupOptimizer
             return ((end - start) * 1000.0 / Stopwatch.Frequency).ToString("F3", CultureInfo.InvariantCulture);
         }
 
-        public static void Pack(string path) { packStarts[path + "/"] = Now; }
+        public static void Pack(string path) { packStarts[path + "/"] = Now; Prefetch.NotePack(path); }
         public static void StartMap(string prefix)
         {
             scan = new PackScan { Prefix = prefix, Culture = CultureInfo.CurrentCulture, Start = Now };
@@ -173,7 +173,11 @@ namespace CityStartupOptimizer
             previous = now;
             return 1;
         }
-        public static void PrefabsEnd() { Session.Event("Prefab loading finished. One-frame waits=" + batches); }
+        public static void PrefabsEnd()
+        {
+            Session.Event("Prefab loading finished. One-frame waits=" + batches);
+            PackageCache.SaveLater();
+        }
         static long archiveTicks;
         static int archives;
 
@@ -239,6 +243,9 @@ namespace CityStartupOptimizer
             Ownership.End(); packStarts.Clear();
             Session.Event("Finished applying playset. Buffered archive directories=" + Volatile.Read(ref archives) +
                 " directory read ms=" + Milliseconds(0, Interlocked.Read(ref archiveTicks)));
+            Session.Event(PackageCache.Summary());
+            Prefetch.SavePacks();
+            PackageCache.SaveLater();
         }
         public static void RegisterStart() { Session.Event("Discovering mod assemblies"); }
         public static void RegisterEnd() { Session.Event("Finished discovering mod assemblies"); }

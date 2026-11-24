@@ -70,7 +70,9 @@ namespace CityStartupOptimizer
                         throw new InvalidOperationException(name + " was already bound to another location");
                     log("Loaded verified " + name);
                 }
-                log("Enabled pack prefix reuse, indexed registration misses, one-frame prefab batches, overlapping native studio screens and 64 KiB directory and 30-byte ZIP entry-header reads.");
+                log("Enabled pack prefix reuse, indexed registration misses, one-frame prefab batches, overlapping native studio screens, 64 KiB directory and 30-byte ZIP entry-header reads, the package cache and background prefetch.");
+                // Package cache and prefetch start only after every check above passed, so stock loading stays stock.
+                session.Assembly.GetType("CityStartupOptimizer.Prefetch", true).GetMethod("Start").Invoke(null, new object[] { game, data });
             }
             catch (Exception ex) { log("Optimizer initialization stopped. " + ex); }
         }
